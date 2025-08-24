@@ -1,7 +1,29 @@
+import { Dialog, showDialog } from '@jupyterlab/apputils';
 import { PathExt } from '@jupyterlab/coreutils';
-import { CommandRegistry } from '@lumino/commands';
-import { CommandArguments } from './commandsAndMenu';
-import { ContextCommandIDs, Git } from './tokens';
+import { GitExtension } from './model';
+import {
+  folderFileIconSelectedStyle,
+  folderFileIconStyle,
+  genericFileIconSelectedStyle,
+  genericFileIconStyle,
+  imageFileIconSelectedStyle,
+  imageFileIconStyle,
+  jsonFileIconSelectedStyle,
+  jsonFileIconStyle,
+  kernelFileIconSelectedStyle,
+  kernelFileIconStyle,
+  markdownFileIconSelectedStyle,
+  markdownFileIconStyle,
+  pythonFileIconSelectedStyle,
+  pythonFileIconStyle,
+  spreadsheetFileIconSelectedStyle,
+  spreadsheetFileIconStyle,
+  yamlFileIconSelectedStyle,
+  yamlFileIconStyle,
+  notebookFileIconSelectedStyle,
+  notebookFileIconStyle
+} from './style/FileListStyle';
+import { Git } from './tokens';
 
 /** Get the filename from a path */
 export function extractFilename(path: string): string {
@@ -12,43 +34,14 @@ export function extractFilename(path: string): string {
   }
 }
 
-/**
- * Wrap mouse event handler to stop event propagation
- * @param fn Mouse event handler
- * @returns Mouse event handler that stops event from propagating
- */
-export function stopPropagationWrapper(
-  fn: (event?: React.MouseEvent<HTMLButtonElement, MouseEvent>) => void
-): (event?: React.MouseEvent<HTMLButtonElement, MouseEvent>) => void {
-  return (event?: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-    event?.stopPropagation();
-    fn(event);
-  };
-}
-
 export function decodeStage(x: string, y: string): Git.Status {
-  /**
-   * All combinations of statuses for merge conflicts
-   * @see https://git-scm.com/docs/git-status#_short_format
-   */
-  const unmergedCombinations: Record<string, string[]> = {
-    D: ['D', 'U'],
-    A: ['U', 'A'],
-    U: ['D', 'A', 'U']
-  };
-
-  // If the file has a merge conflict
-  if ((unmergedCombinations[x] ?? []).includes(y)) {
-    return 'unmerged';
-  }
-
   // If file is untracked
   if (x === '?' && y === '?') {
     return 'untracked';
   } else {
     // If file is staged
-    if (x !== ' ') {
-      return y !== ' ' ? 'partially-staged' : 'staged';
+    if (x !== ' ' && y !== 'D') {
+      return 'staged';
     }
     // If file is unstaged but tracked
     if (y !== ' ') {
@@ -59,69 +52,73 @@ export function decodeStage(x: string, y: string): Git.Status {
   return null;
 }
 
-/**
- * Returns a promise which resolves after a specified duration.
- *
- * @param ms - duration (in milliseconds)
- * @returns a promise
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+/** Open a file in the git listing */
+export async function openListedFile(
+  file: Git.IStatusFileResult,
+  model: GitExtension
+) {
+  const { x, y, to } = file;
+  if (x === 'D' || y === 'D') {
+    await showDialog({
+      title: 'Open File Failed',
+      body: 'This file has been deleted!',
+      buttons: [Dialog.warnButton({ label: 'OK' })]
+    });
+    return;
+  }
+  try {
+    if (to[to.length - 1] !== '/') {
+      model.commands.execute('docmanager:open', {
+        path: model.getRelativeFilePath(to)
+      });
+    } else {
+      console.log('Cannot open a folder here');
+    }
+  } catch (err) {
+    console.error(`Fail to open ${to}.`);
+  }
 }
 
 /**
- * A callback function to display a file diff between two commits.
- * @param commands the command registry.
- * @returns a callback function to display a file diff.
+ * Get the extension of a given file
+ *
+ * @param path File path for which the icon should be found
+ * @param selected Is the file selected? Optional: default is false
  */
-export const openFileDiff =
-  (commands: CommandRegistry) =>
-  /**
-   * A callback function to display a file diff between two commits.
-   *
-   * @param commit Commit data.
-   * @param previousCommit Previous commit data to display the diff against. If not specified, the diff will be against the preceding commit.
-   *
-   * @returns A callback function.
-   */
-  (commit: Git.ISingleCommitInfo, previousCommit?: Git.ISingleCommitInfo) =>
-  /**
-   * Returns a callback to be invoked on click to display a file diff.
-   *
-   * @param filePath file path.
-   * @param isText indicates whether the file supports displaying a diff.
-   * @param previousFilePath when file has been relocated.
-   * @returns callback.
-   */
-  (filePath: string, isText: boolean, previousFilePath?: string) =>
-  /**
-   * Callback invoked upon clicking to display a file diff.
-   *
-   * @param event - event object
-   */
-  async (
-    event?: React.MouseEvent<HTMLLIElement, MouseEvent>
-  ): Promise<void> => {
-    // Prevent the commit component from being collapsed:
-    event?.stopPropagation();
-
-    if (isText) {
-      try {
-        commands.execute(ContextCommandIDs.gitFileDiff, {
-          files: [
-            {
-              filePath,
-              previousFilePath,
-              isText,
-              context: {
-                previousRef: previousCommit?.commit ?? commit.pre_commits[0], // not sure
-                currentRef: commit.commit
-              }
-            }
-          ]
-        } as CommandArguments.IGitFileDiff as any);
-      } catch (err) {
-        console.error(`Failed to open diff view for ${filePath}.\n${err}`);
-      }
-    }
-  };
+export function getFileIconClassName(path: string, selected = false): string {
+  if (path[path.length - 1] === '/') {
+    return selected ? folderFileIconSelectedStyle : folderFileIconStyle;
+  }
+  const fileExtension = PathExt.extname(path).toLocaleLowerCase();
+  switch (fileExtension) {
+    case '.md':
+      return selected ? markdownFileIconSelectedStyle : markdownFileIconStyle;
+    case '.py':
+      return selected ? pythonFileIconSelectedStyle : pythonFileIconStyle;
+    case '.ipynb':
+      return selected ? notebookFileIconSelectedStyle : notebookFileIconStyle;
+    case '.json':
+      return selected ? jsonFileIconSelectedStyle : jsonFileIconStyle;
+    case '.csv':
+    case '.xls':
+    case '.xlsx':
+      return selected
+        ? spreadsheetFileIconSelectedStyle
+        : spreadsheetFileIconStyle;
+    case '.r':
+      return selected ? kernelFileIconSelectedStyle : kernelFileIconStyle;
+    case '.yml':
+    case '.yaml':
+      return selected ? yamlFileIconSelectedStyle : yamlFileIconStyle;
+    case '.svg':
+    case '.tiff':
+    case '.jpeg':
+    case '.jpg':
+    case '.gif':
+    case '.png':
+    case '.raw':
+      return selected ? imageFileIconSelectedStyle : imageFileIconStyle;
+    default:
+      return selected ? genericFileIconSelectedStyle : genericFileIconStyle;
+  }
+}
